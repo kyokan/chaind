@@ -1,0 +1,24 @@
+btc_path = "btc"
+cert_path = ""
+eth_path = "eth"
+home = "/etc/chaind"
+rpc_port = 8080
+use_tls = false
+log_level = "info"
+
+[log_auditor]
+log_file="/var/log/chaind_audit.log"
+
+[redis]
+url="localhost:6379"
+
+[[backend]]
+type="ETH"
+url="https://mainnet.infura.io/"
+name="infura"
+
+[[backend]]
+type="ETH"
+url="http://localhost:8545/"
+name="local"
+main=true
