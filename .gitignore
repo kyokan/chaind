@@ -3,3 +3,4 @@ target
 vendor
 
 build/workspace
+docs/_build
