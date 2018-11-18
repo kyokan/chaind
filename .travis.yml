@@ -3,6 +3,10 @@ go:
   - "1.10.x"
   - "1.11.x"
 
+before_install:
+  # set up dep
+  - curl -L -s https://raw.githubusercontent.com/golang/dep/v0.5.0/install.sh | sh
+
 services:
   - redis-server
 
