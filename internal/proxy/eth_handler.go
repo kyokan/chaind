@@ -445,7 +445,7 @@ func (h *EthHandler) hdlGetBalanceAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrp
 	}
 	cacheKey := balanceCacheKey(addr)
 	h.logger.Debug("stored request in balance cache", log.WithRequestID(ctx, "cache_key", cacheKey, "size", len(rpcRes.Result))...)
-	return h.cacher.MapSetEx(cacheKey, toCache, 15 * time.Second)
+	return h.cacher.MapSetEx(cacheKey, toCache, time.Minute)
 }
 
 func writeResponse(res http.ResponseWriter, id interface{}, data []byte) error {
