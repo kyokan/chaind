@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/kyokan/chaind.svg?branch=master)](https://travis-ci.org/kyokan/chaind)
+
 # chaind
 
 chaind is a security and caching layer for blockchain nodes. Out-of-the box, chaind supports the following for Ethereum nodes:
