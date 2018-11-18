@@ -3,4 +3,7 @@ go:
   - "1.10.x"
   - "1.11.x"
 
+services:
+  - redis-server
+
 script: make deps && make build && make test
