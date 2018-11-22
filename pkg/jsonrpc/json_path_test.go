@@ -88,7 +88,9 @@ func TestParsePatherObject(t *testing.T) {
 
 	parsedNil, err := ParsePather([]byte("null"))
 	require.NoError(t, err)
-	require.Nil(t, parsedNil)
+	isNil, err := parsedNil.IsNil("")
+	require.NoError(t, err)
+	require.True(t, isNil)
 }
 
 func TestParsePathablerArray(t *testing.T) {

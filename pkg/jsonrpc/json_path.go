@@ -18,7 +18,9 @@ var NullBody = []byte("null")
 
 func ParsePather(message json.RawMessage) (*JSONPather, error) {
 	if bytes.Equal(message, NullBody) {
-		return nil, nil
+		return &JSONPather{
+			data: nil,
+		}, nil
 	}
 
 	var data interface{}
