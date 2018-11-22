@@ -13,7 +13,7 @@ import (
 	"encoding/json"
 	"github.com/kyokan/chaind/pkg/config"
 	"sync"
-)
+		)
 
 const ethCheckBody = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":%d}"
 
@@ -114,7 +114,7 @@ func (h *BackendSwitchImpl) doHealthcheck(idx int32, list []config.Backend) int3
 	backend := list[idx]
 	logger.Debug("performing healthcheck", "type", backend.Type, "name", backend.Name, "url", backend.URL)
 	checker := NewChecker(&backend)
-	ok := checker.Check()
+	ok := CheckWithBackoff(checker)
 
 	if !ok {
 		logger.Warn("backend is unhealthy, trying another", "type", backend.Type, "name", backend.Name, "url", backend.URL)
@@ -182,4 +182,18 @@ func (e *ETHChecker) Check() bool {
 		return false
 	}
 	return true
+}
+
+func CheckWithBackoff(checker Checker) bool {
+	count := 0
+
+	for count < 3 {
+		if checker.Check() {
+			return true
+		}
+		count++
+		time.Sleep(time.Second)
+	}
+
+	return false
 }

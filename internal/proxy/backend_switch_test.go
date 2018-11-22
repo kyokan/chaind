@@ -72,7 +72,7 @@ func (b *BackendSwitchSuite) TestBackendFor_A_InitialSuccess() {
 
 func (b *BackendSwitchSuite) TestBackendFor_B_AfterFailedHealthcheck() {
 	b.code1 = http.StatusInternalServerError
-	time.Sleep(1100 * time.Millisecond)
+	time.Sleep(5000 * time.Millisecond)
 	backend, err := b.sw.BackendFor(pkg.EthBackend)
 	require.NoError(b.T(), err)
 	require.Equal(b.T(), b.srv2.URL, backend.URL)
@@ -80,7 +80,7 @@ func (b *BackendSwitchSuite) TestBackendFor_B_AfterFailedHealthcheck() {
 
 func (b *BackendSwitchSuite) TestBackendFor_C_NoMoreBackends() {
 	b.code2 = http.StatusInternalServerError
-	time.Sleep(1100*time.Millisecond)
+	time.Sleep(5000*time.Millisecond)
 	backend, err := b.sw.BackendFor(pkg.EthBackend)
 	require.Error(b.T(), err)
 	require.Nil(b.T(), backend)
