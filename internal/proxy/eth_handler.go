@@ -27,7 +27,6 @@ type handler struct {
 }
 
 type EthHandler struct {
-	cacher      cache.Cacher
 	store       *cache.ETHStore
 	auditor     audit.Auditor
 	hWatcher    *cache.BlockHeightWatcher
@@ -37,10 +36,9 @@ type EthHandler struct {
 	enabledAPIs *sets.StringSet
 }
 
-func NewEthHandler(cacher cache.Cacher, auditor audit.Auditor, hWatcher *cache.BlockHeightWatcher, enabledAPIs []string) *EthHandler {
+func NewEthHandler(store *cache.ETHStore, auditor audit.Auditor, hWatcher *cache.BlockHeightWatcher, enabledAPIs []string) *EthHandler {
 	h := &EthHandler{
-		store:    cache.NewETHStore(cacher, hWatcher),
-		cacher:   cacher,
+		store:    store,
 		auditor:  auditor,
 		hWatcher: hWatcher,
 		logger:   log.NewLog("proxy/eth_handler"),
@@ -127,7 +125,7 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 
 	split := strings.Split(rpcReq.Method, "_")
 	if !h.enabledAPIs.Contains(split[0]) {
-		failRequest(res, rpcReq.Id, -32602, "bad request")
+		failRequest(res, rpcReq.ID, -32602, "bad request")
 		return
 	}
 
@@ -143,21 +141,21 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 
 	proxyRes, err := h.client.Post(backend.URL, "application/json", bytes.NewReader(body))
 	if err != nil || proxyRes.StatusCode != 200 {
-		failRequest(res, rpcReq.Id, -32602, "bad request")
+		failRequest(res, rpcReq.ID, -32602, "bad request")
 		return
 	}
 	defer proxyRes.Body.Close()
 
 	resBody, err := ioutil.ReadAll(proxyRes.Body)
 	if err != nil {
-		failWithInternalError(res, rpcReq.Id, err)
+		failWithInternalError(res, rpcReq.ID, err)
 		logger.Error("failed to read body")
 	}
 
 	res.Write(resBody)
 	if err != nil {
 		logger.Error("failed to flush proxied request")
-		failWithInternalError(res, rpcReq.Id, err)
+		failWithInternalError(res, rpcReq.ID, err)
 		return
 	}
 
@@ -185,7 +183,7 @@ func (h *EthHandler) hdlBlockNumberBefore(res http.ResponseWriter, rpcReq *jsonr
 		return false
 	}
 
-	err := writeResponse(res, rpcReq.Id, []byte("\""+jsonrpc.Uint642Hex(height)+"\""))
+	err := writeResponse(res, rpcReq.ID, []byte("\""+jsonrpc.Uint642Hex(height)+"\""))
 	if err != nil {
 		logger.Error("failed to write cached response")
 		return false
@@ -217,7 +215,7 @@ func (h *EthHandler) hdlGetBlockByNumberBefore(res http.ResponseWriter, rpcReq *
 			return false
 		}
 
-		err = writeResponse(res, rpcReq.Id, cached)
+		err = writeResponse(res, rpcReq.ID, cached)
 		if err != nil {
 			logger.Error("failed to write cached response", "err", err)
 			return false
@@ -233,7 +231,8 @@ func (h *EthHandler) hdlGetBlockByNumberBefore(res http.ResponseWriter, rpcReq *
 
 func (h *EthHandler) hdlGetBlockByNumberAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, logger log15.Logger) error {
 	logger.Debug("post-processing eth_getBlockByNumber")
-	return h.store.CacheBlockByNumber(rpcRes.Result)
+	includeBodies := gjson.GetBytes(rpcReq.Params, "1").Bool()
+	return h.store.CacheBlockByNumber(rpcRes.Result, includeBodies)
 }
 
 func (h *EthHandler) hdlGetTransactionReceiptBefore(res http.ResponseWriter, rpcReq *jsonrpc.Request, logger log15.Logger) bool {
@@ -252,7 +251,7 @@ func (h *EthHandler) hdlGetTransactionReceiptBefore(res http.ResponseWriter, rpc
 			return false
 		}
 
-		err = writeResponse(res, rpcReq.Id, cached)
+		err = writeResponse(res, rpcReq.ID, cached)
 		if err != nil {
 			logger.Error("failed to write cached response", "err", err)
 			return false
@@ -288,7 +287,7 @@ func (h *EthHandler) hdlGetBalanceBefore(res http.ResponseWriter, rpcReq *jsonrp
 		logger.Debug("no cached balance found")
 		return false
 	}
-	err = writeResponse(res, rpcReq.Id, cached)
+	err = writeResponse(res, rpcReq.ID, cached)
 	if err != nil {
 		logger.Error("encountered error writing response")
 		return false
@@ -311,7 +310,7 @@ func (h *EthHandler) hdlGetBalanceAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrp
 func writeResponse(res http.ResponseWriter, id interface{}, data []byte) error {
 	outJson := &jsonrpc.Response{
 		Jsonrpc: jsonrpc.Version,
-		Id:      id,
+		ID:      id,
 		Result:  data,
 	}
 
@@ -329,8 +328,8 @@ func failWithInternalError(res http.ResponseWriter, id interface{}, err error) {
 
 func failRequest(res http.ResponseWriter, id interface{}, code int, msg string) {
 	outJson := &jsonrpc.ErrorResponse{
-		Jsonrpc: jsonrpc.Version,
-		Id:      id,
+		Version: jsonrpc.Version,
+		ID:      id,
 		Error: &jsonrpc.ErrorData{
 			Code:    code,
 			Message: msg,

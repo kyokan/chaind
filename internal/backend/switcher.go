@@ -1,4 +1,4 @@
-package health
+package backend
 
 import (
 	"github.com/kyokan/chaind/pkg"
@@ -17,19 +17,20 @@ import (
 
 const ethCheckBody = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":%d}"
 
-type BackendSwitch interface {
+type Switcher interface {
 	pkg.Service
 	BackendFor(t pkg.BackendType) (*config.Backend, error)
+	ETHClient() (*ETHClient, error)
 }
 
-type BackendSwitchImpl struct {
+type SwitcherImpl struct {
 	ethBackends []config.Backend
 	currEth     int32
 	quitChan    chan bool
 	logger      log15.Logger
 }
 
-func NewBackendSwitch(backendCfg []config.Backend) BackendSwitch {
+func NewSwitcher(backendCfg []config.Backend) Switcher {
 	var ethBackends []config.Backend
 	var currEth int32
 
@@ -43,7 +44,7 @@ func NewBackendSwitch(backendCfg []config.Backend) BackendSwitch {
 		}
 	}
 
-	return &BackendSwitchImpl{
+	return &SwitcherImpl{
 		ethBackends: ethBackends,
 		currEth:     currEth,
 		quitChan:    make(chan bool),
@@ -51,7 +52,7 @@ func NewBackendSwitch(backendCfg []config.Backend) BackendSwitch {
 	}
 }
 
-func (h *BackendSwitchImpl) Start() error {
+func (h *SwitcherImpl) Start() error {
 	h.logger.Info("performing initial health checks on startup")
 	h.performAllHealthchecks()
 
@@ -71,12 +72,12 @@ func (h *BackendSwitchImpl) Start() error {
 	return nil
 }
 
-func (h *BackendSwitchImpl) Stop() error {
+func (h *SwitcherImpl) Stop() error {
 	h.quitChan <- true
 	return nil
 }
 
-func (h *BackendSwitchImpl) BackendFor(t pkg.BackendType) (*config.Backend, error) {
+func (h *SwitcherImpl) BackendFor(t pkg.BackendType) (*config.Backend, error) {
 	var idx int32
 
 	if t == pkg.EthBackend {
@@ -92,7 +93,16 @@ func (h *BackendSwitchImpl) BackendFor(t pkg.BackendType) (*config.Backend, erro
 	return &h.ethBackends[idx], nil
 }
 
-func (h *BackendSwitchImpl) performAllHealthchecks() {
+func (h *SwitcherImpl) ETHClient() (*ETHClient, error) {
+	back, err := h.BackendFor(pkg.EthBackend)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewETHClient(back.URL), nil
+}
+
+func (h *SwitcherImpl) performAllHealthchecks() {
 	// use waitgroup so we can add btc checks later
 	var wg sync.WaitGroup
 	if h.currEth != -1 {
@@ -106,7 +116,7 @@ func (h *BackendSwitchImpl) performAllHealthchecks() {
 	wg.Wait()
 }
 
-func (h *BackendSwitchImpl) doHealthcheck(idx int32, list []config.Backend) int32 {
+func (h *SwitcherImpl) doHealthcheck(idx int32, list []config.Backend) int32 {
 	if idx == -1 {
 		return -1
 	}
@@ -125,7 +135,7 @@ func (h *BackendSwitchImpl) doHealthcheck(idx int32, list []config.Backend) int3
 	return idx
 }
 
-func (h *BackendSwitchImpl) nextBackend(idx int32, list []config.Backend) (int32, []config.Backend) {
+func (h *SwitcherImpl) nextBackend(idx int32, list []config.Backend) (int32, []config.Backend) {
 	backend := list[idx]
 	if len(list) == 1 || idx == int32(len(list) - 1) {
 		h.logger.Error("no more backends to try", "type", backend.Type)

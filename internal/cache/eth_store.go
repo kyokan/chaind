@@ -31,8 +31,8 @@ func (e *ETHStore) GetBlockByNumber(number uint64, includeBodies bool) ([]byte, 
 	return e.cacher.Get(blockNumCacheKey(number, includeBodies))
 }
 
-func (e *ETHStore) CacheBlockByNumber(data []byte) error {
-	results := gjson.GetManyBytes(data, "number", "1")
+func (e *ETHStore) CacheBlockByNumber(data []byte, includeBodies bool) error {
+	results := gjson.GetManyBytes(data, "number", "transactions")
 	if !results[0].Exists() {
 		e.logger.Debug("skipping post-processing for null block")
 		return nil
@@ -43,13 +43,12 @@ func (e *ETHStore) CacheBlockByNumber(data []byte) error {
 		e.logger.Error("encountered invalid block number, bailing")
 		return nil
 	}
-	includeBodies := results[1].Bool()
 
 	var expiry time.Duration
 	if e.hWatcher.IsFinalized(blockNum) {
 		expiry = time.Hour
 	} else {
-		e.logger.Debug("not caching un-finalized block")
+		e.logger.Debug("not caching un-finalized block", "number", blockNum)
 		return nil
 	}
 
@@ -61,7 +60,7 @@ func (e *ETHStore) GetTransactionReceipt(hash string) ([]byte, error) {
 }
 
 func (e *ETHStore) CacheTransactionReceipt(data []byte) error {
-	if !gjson.GetBytes(data, "").Exists() {
+	if !gjson.ParseBytes(data).Exists() {
 		e.logger.Debug("skipping post-processing for null transaction")
 		return nil
 	}
@@ -81,7 +80,7 @@ func (e *ETHStore) CacheTransactionReceipt(data []byte) error {
 	if e.hWatcher.IsFinalized(blockNum) {
 		expiry = time.Hour
 	} else {
-		e.logger.Debug("not caching un-finalized tx receipt")
+		e.logger.Debug("not caching un-finalized tx receipt", "hash", txHash, "number", blockNum)
 		return nil
 	}
 

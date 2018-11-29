@@ -2,7 +2,7 @@ package internal
 
 import (
 	"github.com/kyokan/chaind/pkg/config"
-		"github.com/kyokan/chaind/internal/proxy"
+	"github.com/kyokan/chaind/internal/proxy"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,12 +10,12 @@ import (
 	"github.com/kyokan/chaind/internal/audit"
 	"github.com/kyokan/chaind/internal/cache"
 	"github.com/inconshreveable/log15"
-	"github.com/kyokan/chaind/internal/health"
+	"github.com/kyokan/chaind/internal/backend"
 )
 
 func Start(cfg *config.Config) error {
 	if err := config.ValidateConfig(cfg); err != nil {
-	    return err
+		return err
 	}
 
 	logger := log.NewLog("")
@@ -26,7 +26,7 @@ func Start(cfg *config.Config) error {
 	}
 	log.SetLevel(lvl)
 
-	sw := health.NewBackendSwitch(cfg.Backends)
+	sw := backend.NewSwitcher(cfg.Backends)
 	if err := sw.Start(); err != nil {
 		return err
 	}
@@ -41,12 +41,18 @@ func Start(cfg *config.Config) error {
 		return err
 	}
 
-	fHelper := cache.NewBlockHeightWatcher(sw)
-	if err := fHelper.Start(); err != nil {
+	hWatcher := cache.NewBlockHeightWatcher(sw)
+	if err := hWatcher.Start(); err != nil {
 		return err
 	}
 
-	prox := proxy.NewProxy(sw, auditor, cacher, fHelper, cfg)
+	store := cache.NewETHStore(cacher, hWatcher)
+	warmer := cache.NewWarmer(store, cacher, hWatcher, sw)
+	if err := warmer.Start(); err != nil {
+		return err
+	}
+
+	prox := proxy.NewProxy(sw, auditor, store, hWatcher, cfg)
 	if err := prox.Start(); err != nil {
 		return err
 	}
@@ -64,11 +70,14 @@ func Start(cfg *config.Config) error {
 		if err := cacher.Stop(); err != nil {
 			logger.Error("failed to stop cacher", "err", err)
 		}
-		if err := fHelper.Stop(); err != nil {
+		if err := hWatcher.Stop(); err != nil {
 			logger.Error("failed to stop finalization helper", "err", err)
 		}
 		if err := prox.Stop(); err != nil {
 			logger.Error("failed to stop proxy", "err", err)
+		}
+		if err := warmer.Stop(); err != nil {
+			logger.Error("failed to stop cache warmer", "err", err)
 		}
 		done <- true
 	}()

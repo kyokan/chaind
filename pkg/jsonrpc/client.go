@@ -3,14 +3,16 @@ package jsonrpc
 import (
 	"net/http"
 	"time"
-		"encoding/json"
+	"encoding/json"
 	"bytes"
 	"io/ioutil"
-	)
+	"sync/atomic"
+)
 
 type Client struct {
 	url    string
 	client *http.Client
+	lastId int64
 }
 
 func NewClient(url string, timeout time.Duration) *Client {
@@ -22,7 +24,7 @@ func NewClient(url string, timeout time.Duration) *Client {
 	}
 }
 
-func (c *Client) Execute(method string, params interface{}) (*Response, error) {
+func (c *Client) Call(method string, params... interface{}) (*Response, error) {
 	if params == nil {
 		params = []interface{}{}
 	}
@@ -32,10 +34,10 @@ func (c *Client) Execute(method string, params interface{}) (*Response, error) {
 		return nil, err
 	}
 
-	id := time.Now().Unix()
+	id := atomic.AddInt64(&c.lastId, 1)
 	req := &Request{
-		Jsonrpc: Version,
-		Id:      id,
+		Version: Version,
+		ID:      id,
 		Method:  method,
 		Params:  serBody,
 	}
@@ -44,7 +46,12 @@ func (c *Client) Execute(method string, params interface{}) (*Response, error) {
 		return nil, err
 	}
 
-	res, err := c.client.Post(c.url, "application/json", bytes.NewReader(serReq))
+	httpReq, err := http.NewRequest("POST", c.url, bytes.NewReader(serReq))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Close = true
+	res, err := c.client.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
