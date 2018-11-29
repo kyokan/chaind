@@ -11,24 +11,24 @@ import (
 	"github.com/kyokan/chaind/internal/audit"
 	"github.com/satori/go.uuid"
 	"github.com/kyokan/chaind/internal/cache"
-	"github.com/kyokan/chaind/internal/health"
+	"github.com/kyokan/chaind/internal/backend"
 )
 
 var logger = log.NewLog("proxy")
 
 type Proxy struct {
-	sw         health.BackendSwitch
+	sw         backend.Switcher
 	config     *config.Config
 	ethHandler *EthHandler
 	quitChan   chan bool
 	errChan    chan error
 }
 
-func NewProxy(sw health.BackendSwitch, auditor audit.Auditor, cacher cache.Cacher, fHelper *cache.BlockHeightWatcher, config *config.Config) *Proxy {
+func NewProxy(sw backend.Switcher, auditor audit.Auditor, store *cache.ETHStore, fHelper *cache.BlockHeightWatcher, config *config.Config) *Proxy {
 	return &Proxy{
 		sw:         sw,
 		config:     config,
-		ethHandler: NewEthHandler(cacher, auditor, fHelper, config.ETHConfig.APIs),
+		ethHandler: NewEthHandler(store, auditor, fHelper, config.ETHConfig.APIs),
 		quitChan:   make(chan bool),
 		errChan:    make(chan error),
 	}
@@ -80,11 +80,11 @@ func (p *Proxy) handleETHRequest(res http.ResponseWriter, req *http.Request) {
 	}
 
 	start := time.Now()
-	backend, err := p.sw.BackendFor(pkg.EthBackend)
+	back, err := p.sw.BackendFor(pkg.EthBackend)
 	if err != nil {
 		res.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	p.ethHandler.Handle(res, req, backend)
+	p.ethHandler.Handle(res, req, back)
 	cLog.Info("finished handling Ethereum JSON-RPC request", "elapsed", time.Since(start))
 }

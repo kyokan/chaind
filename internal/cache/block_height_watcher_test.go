@@ -9,7 +9,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/stretchr/testify/require"
 		"testing"
-	)
+	"github.com/kyokan/chaind/internal/backend"
+)
 
 type MockBackendSwitch struct {
 	mock.Mock
@@ -40,6 +41,10 @@ func (m *MockBackendSwitch) BackendFor(t pkg.BackendType) (*config.Backend, erro
 		Name: "test",
 		Main: false,
 	}, nil
+}
+
+func (m *MockBackendSwitch) ETHClient() (*backend.ETHClient, error) {
+	return nil, nil
 }
 
 type BlockHeightWatcherSuite struct {

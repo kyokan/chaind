@@ -9,20 +9,26 @@ import (
 	"encoding/json"
 	"sync/atomic"
 	"github.com/kyokan/chaind/pkg/jsonrpc"
-	"github.com/kyokan/chaind/internal/health"
+			"sync"
+	"github.com/kyokan/chaind/internal/backend"
 )
 
 const FinalityDepth = 7
 
+type BlockSub func(number uint64)
+
 type BlockHeightWatcher struct {
 	blockNumber uint64
-	sw          health.BackendSwitch
+	sw          backend.Switcher
 	quitChan    chan bool
 	logger      log15.Logger
 	client      *http.Client
+	subs        map[int]BlockSub
+	lastSub     int
+	subMu       sync.Mutex
 }
 
-func NewBlockHeightWatcher(sw health.BackendSwitch) *BlockHeightWatcher {
+func NewBlockHeightWatcher(sw backend.Switcher) *BlockHeightWatcher {
 	return &BlockHeightWatcher{
 		sw:       sw,
 		quitChan: make(chan bool),
@@ -30,6 +36,7 @@ func NewBlockHeightWatcher(sw health.BackendSwitch) *BlockHeightWatcher {
 		client: &http.Client{
 			Timeout: time.Second,
 		},
+		subs: make(map[int]BlockSub),
 	}
 }
 
@@ -59,21 +66,36 @@ func (b *BlockHeightWatcher) Stop() error {
 
 func (b *BlockHeightWatcher) IsFinalized(blockNum uint64) bool {
 	height := atomic.LoadUint64(&b.blockNumber)
-	return height-blockNum >= FinalityDepth
+	return height - FinalityDepth >= blockNum
 }
 
 func (b *BlockHeightWatcher) BlockHeight() uint64 {
 	return atomic.LoadUint64(&b.blockNumber)
 }
 
+func (b *BlockHeightWatcher) Subscribe(cb BlockSub) int {
+	b.subMu.Lock()
+	defer b.subMu.Unlock()
+
+	b.lastSub++
+	b.subs[b.lastSub] = cb
+	return b.lastSub
+}
+
+func (b *BlockHeightWatcher) Unsubscribe(hdl int) {
+	b.subMu.Lock()
+	defer b.subMu.Unlock()
+	delete(b.subs, hdl)
+}
+
 func (b *BlockHeightWatcher) updateBlockHeight() {
-	backend, err := b.sw.BackendFor(pkg.EthBackend)
+	back, err := b.sw.BackendFor(pkg.EthBackend)
 	if err != nil {
 		b.logger.Error("no backend available", "err", err)
 	}
 
-	client := jsonrpc.NewClient(backend.URL, time.Second)
-	res, err := client.Execute("eth_blockNumber", nil)
+	client := jsonrpc.NewClient(back.URL, time.Second)
+	res, err := client.Call("eth_blockNumber")
 	if err != nil {
 		b.logger.Error("failed to fetch block height", "err", err)
 		return
@@ -91,5 +113,13 @@ func (b *BlockHeightWatcher) updateBlockHeight() {
 	}
 
 	b.logger.Debug("updated block height", "from", atomic.LoadUint64(&b.blockNumber), "to", heightBig.Uint64())
-	atomic.StoreUint64(&b.blockNumber, heightBig.Uint64())
+	height := heightBig.Uint64()
+	atomic.StoreUint64(&b.blockNumber, height)
+	go b.notifySubs(height)
+}
+
+func (b *BlockHeightWatcher) notifySubs(height uint64) {
+	for _, sub := range b.subs {
+		go sub(height)
+	}
 }

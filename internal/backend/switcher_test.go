@@ -1,4 +1,4 @@
-package health
+package backend
 
 import (
 	"net/http/httptest"
@@ -13,7 +13,7 @@ import (
 
 type BackendSwitchSuite struct {
 	suite.Suite
-	sw    BackendSwitch
+	sw    Switcher
 	srv1  *httptest.Server
 	srv2  *httptest.Server
 	code1 int
@@ -41,7 +41,7 @@ func (b *BackendSwitchSuite) SetupSuite() {
 	b.body1 = []byte("{\"jsonrpc\":\"2.0\",\"result\":false,\"id\":1}")
 	b.body2 = []byte("{\"jsonrpc\":\"2.0\",\"result\":false,\"id\":1}")
 
-	b.sw = NewBackendSwitch([]config.Backend{
+	b.sw = NewSwitcher([]config.Backend{
 		{
 			Name: "test-1",
 			URL:  b.srv1.URL,
