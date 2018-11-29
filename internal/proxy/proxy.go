@@ -11,19 +11,20 @@ import (
 	"github.com/kyokan/chaind/internal/audit"
 	"github.com/satori/go.uuid"
 	"github.com/kyokan/chaind/internal/cache"
+	"github.com/kyokan/chaind/internal/health"
 )
 
 var logger = log.NewLog("proxy")
 
 type Proxy struct {
-	sw         BackendSwitch
+	sw         health.BackendSwitch
 	config     *config.Config
 	ethHandler *EthHandler
 	quitChan   chan bool
 	errChan    chan error
 }
 
-func NewProxy(sw BackendSwitch, auditor audit.Auditor, cacher cache.Cacher, fHelper *BlockHeightWatcher, config *config.Config) *Proxy {
+func NewProxy(sw health.BackendSwitch, auditor audit.Auditor, cacher cache.Cacher, fHelper *cache.BlockHeightWatcher, config *config.Config) *Proxy {
 	return &Proxy{
 		sw:         sw,
 		config:     config,
@@ -71,8 +72,9 @@ func (p *Proxy) Stop() error {
 func (p *Proxy) handleETHRequest(res http.ResponseWriter, req *http.Request) {
 	ctx := context.WithValue(req.Context(), log.RequestIDKey, uuid.NewV4().String())
 	req = req.WithContext(ctx)
+	cLog := log.WithContext(logger, req.Context())
 	if req.Method != "POST" {
-		logger.Info("rejected non-POST request to eth endpoint", log.WithRequestID(ctx)...)
+		cLog.Info("rejected non-POST request to eth endpoint")
 		res.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
@@ -84,5 +86,5 @@ func (p *Proxy) handleETHRequest(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	p.ethHandler.Handle(res, req, backend)
-	logger.Info("finished handling Ethereum JSON-RPC request", log.WithRequestID(ctx, "elapsed", time.Since(start))...)
+	cLog.Info("finished handling Ethereum JSON-RPC request", "elapsed", time.Since(start))
 }

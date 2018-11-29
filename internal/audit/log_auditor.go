@@ -41,12 +41,14 @@ func (l *LogAuditor) RecordRequest(req *http.Request, body []byte, reqType pkg.B
 }
 
 func (l *LogAuditor) recordETHRequest(req *http.Request, body []byte) error {
+	logger := log.WithContext(l.logger.New("remote_addr", remoteAddr(req), "user_agent", req.Header.Get("user-agent")), req.Context())
 	var rpcReq jsonrpc.Request
 	err := json.Unmarshal(body, &rpcReq)
 	if err != nil {
-		l.logger.Error(
+		logger.Error(
 			"received request with invalid JSON body",
-			mergeLogKeys(req, "type", pkg.EthBackend)...,
+			"type",
+			pkg.EthBackend,
 		)
 		return nil
 	}
@@ -55,22 +57,12 @@ func (l *LogAuditor) recordETHRequest(req *http.Request, body []byte) error {
 	if err != nil {
 		return err
 	}
-	l.logger.Info(
+	logger.Info(
 		"received JSON-RPC request",
-		mergeLogKeys(req, "rpc_method", rpcReq.Method, "rpc_params", string(params))...,
+		"rpc_method", rpcReq.Method,
+		"rpc_params", string(params),
 	)
 	return nil
-}
-
-func mergeLogKeys(req *http.Request, keys ... interface{}) []interface{} {
-	defaults := []interface{}{
-		"remote_addr",
-		remoteAddr(req),
-		"user_agent",
-		req.Header.Get("user-agent"),
-	}
-
-	return log.WithRequestID(req.Context(), append(defaults, keys...)...)
 }
 
 func remoteAddr(req *http.Request) string {

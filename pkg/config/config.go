@@ -45,6 +45,7 @@ type Config struct {
 	LogAuditorConfig *LogAuditorConfig `mapstructure:"log_auditor"`
 	RedisConfig      *RedisConfig      `mapstructure:"redis"`
 	Backends         []Backend         `mapstructure:"backend"`
+	Master           bool              `mapstructure:"master"`
 }
 
 type LogAuditorConfig struct {

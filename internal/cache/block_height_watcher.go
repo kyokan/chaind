@@ -1,4 +1,4 @@
-package proxy
+package cache
 
 import (
 	"time"
@@ -9,19 +9,20 @@ import (
 	"encoding/json"
 	"sync/atomic"
 	"github.com/kyokan/chaind/pkg/jsonrpc"
-	)
+	"github.com/kyokan/chaind/internal/health"
+)
 
 const FinalityDepth = 7
 
 type BlockHeightWatcher struct {
 	blockNumber uint64
-	sw          BackendSwitch
+	sw          health.BackendSwitch
 	quitChan    chan bool
 	logger      log15.Logger
 	client      *http.Client
 }
 
-func NewBlockHeightWatcher(sw BackendSwitch) *BlockHeightWatcher {
+func NewBlockHeightWatcher(sw health.BackendSwitch) *BlockHeightWatcher {
 	return &BlockHeightWatcher{
 		sw:       sw,
 		quitChan: make(chan bool),

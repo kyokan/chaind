@@ -3,7 +3,7 @@ package log
 import (
 	"github.com/inconshreveable/log15"
 	"os"
-	"context"
+		"context"
 )
 
 var rootLog = log15.New()
@@ -27,9 +27,6 @@ func NewLog(module string) log15.Logger {
 	return rootLog.New("module", module)
 }
 
-func WithRequestID(ctx context.Context, keys ... interface{}) []interface{} {
-	return append(keys, []interface{}{
-		"request_id",
-		ctx.Value(RequestIDKey),
-	}...)
+func WithContext(logger log15.Logger, ctx context.Context) log15.Logger {
+	return logger.New(RequestIDKey, ctx.Value(RequestIDKey))
 }
