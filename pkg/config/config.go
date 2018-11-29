@@ -9,6 +9,7 @@ import (
 	"errors"
 	"github.com/kyokan/chaind/pkg"
 	"net/url"
+	"github.com/kyokan/chaind/pkg/sets"
 )
 
 const DefaultHome = "~/.chaind"
@@ -18,15 +19,27 @@ const (
 	FlagHome     = "home"
 	FlagCertPath = "cert_path"
 	FlagUseTLS   = "use_tls"
-	FlagETHURL   = "eth_path"
 	FlagRPCPort  = "rpc_port"
 )
+
+var ValidETHAPIs = sets.NewStringSet([]string{
+	"admin",
+	"db",
+	"debug",
+	"eth",
+	"miner",
+	"net",
+	"personal",
+	"shh",
+	"txpool",
+	"web3",
+})
 
 type Config struct {
 	Home             string            `mapstructure:"home"`
 	CertPath         string            `mapstructure:"cert_path"`
 	UseTLS           bool              `mapstructure:"use_tls"`
-	ETHUrl           string            `mapstructure:"eth_url"`
+	ETHConfig        *ETH              `mapstructure:"eth"`
 	RPCPort          int               `mapstructure:"rpc_port"`
 	LogLevel         string            `mapstructure:"log_level"`
 	LogAuditorConfig *LogAuditorConfig `mapstructure:"log_auditor"`
@@ -51,12 +64,16 @@ type Backend struct {
 	Main bool            `mapstructure:"main"`
 }
 
+type ETH struct {
+	APIs []string `mapstructure:"apis"`
+	Path string   `mapstructure:"path"`
+}
+
 func init() {
 	home := mustExpand(DefaultHome)
 	viper.SetDefault(FlagHome, home)
 	viper.SetDefault(FlagCertPath, "")
 	viper.SetDefault(FlagUseTLS, false)
-	viper.SetDefault(FlagETHURL, "eth")
 	viper.SetDefault(FlagRPCPort, 8080)
 }
 
@@ -109,6 +126,12 @@ func ValidateConfig(cfg *Config) error {
 
 		if backend.Name == "" {
 			return validationError("backend name must be defined")
+		}
+	}
+
+	if cfg.ETHConfig != nil {
+		if !ValidETHAPIs.ContainsAll(cfg.ETHConfig.APIs) {
+			return validationError("invalid API provided")
 		}
 	}
 
