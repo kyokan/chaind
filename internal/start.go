@@ -10,7 +10,8 @@ import (
 	"github.com/kyokan/chaind/internal/audit"
 	"github.com/kyokan/chaind/internal/cache"
 	"github.com/inconshreveable/log15"
-	)
+	"github.com/kyokan/chaind/internal/health"
+)
 
 func Start(cfg *config.Config) error {
 	if err := config.ValidateConfig(cfg); err != nil {
@@ -25,7 +26,7 @@ func Start(cfg *config.Config) error {
 	}
 	log.SetLevel(lvl)
 
-	sw := proxy.NewBackendSwitch(cfg.Backends)
+	sw := health.NewBackendSwitch(cfg.Backends)
 	if err := sw.Start(); err != nil {
 		return err
 	}
@@ -40,7 +41,7 @@ func Start(cfg *config.Config) error {
 		return err
 	}
 
-	fHelper := proxy.NewBlockHeightWatcher(sw)
+	fHelper := cache.NewBlockHeightWatcher(sw)
 	if err := fHelper.Start(); err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package proxy
+package health
 
 import (
 	"github.com/kyokan/chaind/pkg"
@@ -112,16 +112,16 @@ func (h *BackendSwitchImpl) doHealthcheck(idx int32, list []config.Backend) int3
 	}
 
 	backend := list[idx]
-	logger.Debug("performing healthcheck", "type", backend.Type, "name", backend.Name, "url", backend.URL)
+	h.logger.Debug("performing healthcheck", "type", backend.Type, "name", backend.Name, "url", backend.URL)
 	checker := NewChecker(&backend)
 	ok := CheckWithBackoff(checker)
 
 	if !ok {
-		logger.Warn("backend is unhealthy, trying another", "type", backend.Type, "name", backend.Name, "url", backend.URL)
+		h.logger.Warn("backend is unhealthy, trying another", "type", backend.Type, "name", backend.Name, "url", backend.URL)
 		return h.doHealthcheck(h.nextBackend(idx, list))
 	}
 
-	logger.Debug("backend is ok", "type", backend.Type, "name", backend.Name, "url", backend.URL)
+	h.logger.Debug("backend is ok", "type", backend.Type, "name", backend.Name, "url", backend.URL)
 	return idx
 }
 
@@ -174,11 +174,11 @@ func (e *ETHChecker) Check() bool {
 	var dec map[string]interface{}
 	err = json.NewDecoder(res.Body).Decode(&dec)
 	if err != nil {
-		logger.Warn("backend returned invalid JSON", "name", e.backend.Name, "url", e.backend.URL)
+		e.logger.Warn("backend returned invalid JSON", "name", e.backend.Name, "url", e.backend.URL)
 		return false
 	}
 	if _, ok := dec["result"].(bool); !ok {
-		logger.Warn("backend is either completing initial sync or has fallen behind", "name", e.backend.Name, "url", e.backend.URL)
+		e.logger.Warn("backend is either completing initial sync or has fallen behind", "name", e.backend.Name, "url", e.backend.URL)
 		return false
 	}
 	return true

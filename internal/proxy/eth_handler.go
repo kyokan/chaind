@@ -10,19 +10,16 @@ import (
 	"time"
 	"io/ioutil"
 	"bytes"
-	"fmt"
-	"strconv"
-	"github.com/pkg/errors"
 	"github.com/kyokan/chaind/internal/audit"
 	"github.com/kyokan/chaind/pkg/jsonrpc"
 	"github.com/kyokan/chaind/pkg/config"
-	"encoding/binary"
 	"strings"
 	"github.com/kyokan/chaind/pkg/sets"
+	"github.com/tidwall/gjson"
 )
 
-type beforeFunc func(res http.ResponseWriter, req *http.Request, rpcReq *jsonrpc.Request) bool
-type afterFunc func(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, req *http.Request) error
+type beforeFunc func(res http.ResponseWriter, rpcReq *jsonrpc.Request, logger log15.Logger) bool
+type afterFunc func(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, logger log15.Logger) error
 
 type handler struct {
 	before beforeFunc
@@ -30,17 +27,19 @@ type handler struct {
 }
 
 type EthHandler struct {
-	cacher   cache.Cacher
-	auditor  audit.Auditor
-	hWatcher *BlockHeightWatcher
-	handlers map[string]*handler
-	logger   log15.Logger
-	client   *http.Client
+	cacher      cache.Cacher
+	store       *cache.ETHStore
+	auditor     audit.Auditor
+	hWatcher    *cache.BlockHeightWatcher
+	handlers    map[string]*handler
+	logger      log15.Logger
+	client      *http.Client
 	enabledAPIs *sets.StringSet
 }
 
-func NewEthHandler(cacher cache.Cacher, auditor audit.Auditor, hWatcher *BlockHeightWatcher, enabledAPIs []string) *EthHandler {
+func NewEthHandler(cacher cache.Cacher, auditor audit.Auditor, hWatcher *cache.BlockHeightWatcher, enabledAPIs []string) *EthHandler {
 	h := &EthHandler{
+		store:    cache.NewETHStore(cacher, hWatcher),
 		cacher:   cacher,
 		auditor:  auditor,
 		hWatcher: hWatcher,
@@ -64,7 +63,7 @@ func NewEthHandler(cacher cache.Cacher, auditor audit.Auditor, hWatcher *BlockHe
 		},
 		"eth_getBalance": {
 			before: h.hdlGetBalanceBefore,
-			after: h.hdlGetBalanceAfter,
+			after:  h.hdlGetBalanceAfter,
 		},
 	}
 	return h
@@ -72,21 +71,21 @@ func NewEthHandler(cacher cache.Cacher, auditor audit.Auditor, hWatcher *BlockHe
 
 func (h *EthHandler) Handle(res http.ResponseWriter, req *http.Request, backend *config.Backend) {
 	defer req.Body.Close()
-	ctx := req.Context()
+	logger := log.WithContext(h.logger, req.Context())
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		h.logger.Error("failed to read request body", log.WithRequestID(ctx, "err", err)...)
+		logger.Error("failed to read request body")
 		return
 	}
 
 	firstChar := string(body[0])
 	// check if this is a batch request
 	if firstChar == "[" {
-		h.logger.Debug("got batch request", log.WithRequestID(ctx)...)
+		logger.Debug("got batch request")
 		var rpcReqs []jsonrpc.Request
 		err = json.Unmarshal(body, &rpcReqs)
 		if err != nil {
-			h.logger.Warn("received mal-formed batch request", log.WithRequestID(ctx, "err", err)...)
+			logger.Warn("received mal-formed batch request")
 			res.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -96,16 +95,16 @@ func (h *EthHandler) Handle(res http.ResponseWriter, req *http.Request, backend 
 			h.hdlRPCRequest(batch.ResponseWriter(), req, backend, &rpcReq)
 		}
 		if err := batch.Flush(); err != nil {
-			h.logger.Error("failed to flush batch", log.WithRequestID(ctx, "err", err)...)
+			logger.Error("failed to flush batch")
 		}
 
-		h.logger.Debug("processed batch request", log.WithRequestID(ctx, "count", len(rpcReqs))...)
+		logger.Debug("processed batch request")
 	} else {
-		h.logger.Debug("got single request", log.WithRequestID(ctx, "err", err)...)
+		logger.Debug("got single request")
 		var rpcReq jsonrpc.Request
 		err = json.Unmarshal(body, &rpcReq)
 		if err != nil {
-			h.logger.Warn("received mal-formed request", log.WithRequestID(ctx, "err", err)...)
+			logger.Warn("received mal-formed request")
 			res.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -114,16 +113,16 @@ func (h *EthHandler) Handle(res http.ResponseWriter, req *http.Request, backend 
 }
 
 func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, backend *config.Backend, rpcReq *jsonrpc.Request) {
-	ctx := req.Context()
+	logger := log.WithContext(h.logger, req.Context())
 	body, err := json.Marshal(rpcReq)
 	if err != nil {
-		h.logger.Error("failed to unmarshal request body", log.WithRequestID(ctx, "err", err)...)
+		logger.Error("failed to unmarshal request body")
 		return
 	}
 
 	err = h.auditor.RecordRequest(req, body, pkg.EthBackend)
 	if err != nil {
-		h.logger.Error("failed to record audit log for request", log.WithRequestID(ctx, "err", err)...)
+		logger.Error("failed to record audit log for request")
 	}
 
 	split := strings.Split(rpcReq.Method, "_")
@@ -135,10 +134,10 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 	hdlr := h.handlers[rpcReq.Method]
 	handledInBefore := false
 	if hdlr != nil && hdlr.before != nil {
-		handledInBefore = hdlr.before(res, req, rpcReq)
+		handledInBefore = hdlr.before(res, rpcReq, logger)
 	}
 	if handledInBefore {
-		h.logger.Debug("request handled in before filter", log.WithRequestID(ctx)...)
+		logger.Debug("request handled in before filter")
 		return
 	}
 
@@ -152,12 +151,12 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 	resBody, err := ioutil.ReadAll(proxyRes.Body)
 	if err != nil {
 		failWithInternalError(res, rpcReq.Id, err)
-		h.logger.Error("failed to read body", log.WithRequestID(ctx, "err", err))
+		logger.Error("failed to read body")
 	}
 
 	res.Write(resBody)
 	if err != nil {
-		h.logger.Error("failed to flush proxied request", log.WithRequestID(ctx, "err", err)...)
+		logger.Error("failed to flush proxied request")
 		failWithInternalError(res, rpcReq.Id, err)
 		return
 	}
@@ -165,296 +164,148 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 	var rpcRes jsonrpc.Response
 	err = json.Unmarshal(resBody, &rpcRes)
 	if err != nil {
-		h.logger.Debug("skipping post-processors for error response", log.WithRequestID(ctx)...)
+		logger.Debug("skipping post-processors for error response")
 		return
 	}
 
 	if hdlr != nil && hdlr.after != nil {
-		if err := hdlr.after(&rpcRes, rpcReq, req); err != nil {
-			h.logger.Error("request post-processing failed", log.WithRequestID(ctx, "err", err)...)
+		if err := hdlr.after(&rpcRes, rpcReq, logger); err != nil {
+			logger.Error("request post-processing failed")
 		}
 	} else {
-		h.logger.Debug("no post-processor found", log.WithRequestID(ctx)...)
+		logger.Debug("no post-processor found")
 	}
-
 }
 
-func (h *EthHandler) hdlBlockNumberBefore(res http.ResponseWriter, req *http.Request, rpcReq *jsonrpc.Request) bool {
-	ctx := req.Context()
-	h.logger.Debug("pre-processing eth_blockNumber", log.WithRequestID(ctx)...)
+func (h *EthHandler) hdlBlockNumberBefore(res http.ResponseWriter, rpcReq *jsonrpc.Request, logger log15.Logger) bool {
+	logger.Debug("pre-processing eth_blockNumber")
 	height := h.hWatcher.BlockHeight()
 	if height == 0 {
-		h.logger.Warn("received zero block height", log.WithRequestID(ctx)...)
+		logger.Warn("received zero block height")
 		return false
 	}
 
 	err := writeResponse(res, rpcReq.Id, []byte("\""+jsonrpc.Uint642Hex(height)+"\""))
 	if err != nil {
-		h.logger.Error("failed to write cached response", log.WithRequestID(ctx, "err", err)...)
+		logger.Error("failed to write cached response")
 		return false
 	}
-	h.logger.Debug("found cached block number response, sending", log.WithRequestID(ctx)...)
+	logger.Debug("found cached block number response, sending")
 	return true
 }
 
-func (h *EthHandler) hdlGetBlockByNumberBefore(res http.ResponseWriter, req *http.Request, rpcReq *jsonrpc.Request) bool {
-	ctx := req.Context()
-	h.logger.Debug("pre-processing eth_getBlockByNumber", log.WithRequestID(ctx)...)
-	params := rpcReq.ParamsPather()
-	paramCount, err := params.GetLen("")
+func (h *EthHandler) hdlGetBlockByNumberBefore(res http.ResponseWriter, rpcReq *jsonrpc.Request, logger log15.Logger) bool {
+	logger.Debug("pre-processing eth_getBlockByNumber")
+
+	results := gjson.GetManyBytes(rpcReq.Params, "0", "1")
+	blockNumStr := results[0].String()
+	if blockNumStr == "" {
+		logger.Info("encountered invalid block number param, bailing")
+		return false
+	}
+	blockNum, err := jsonrpc.Hex2Uint64(blockNumStr)
 	if err != nil {
-		h.logger.Debug("encountered invalid params object", log.WithRequestID(ctx)...)
+		logger.Info("encountered invalid block number param, bailing")
 		return false
 	}
 
-	blockNum, err := params.GetHexUint("0")
-	if err != nil {
-		h.logger.Debug("encountered invalid block number param, bailing", log.WithRequestID(ctx, "block_num", blockNum)...)
-		return false
-	}
-
-	var includeBodies bool
-	if paramCount == 2 {
-		testIncludeBodies, err := params.GetBool("1")
-		if err != nil {
-			h.logger.Debug("encountered invalid include bodies param, bailing", log.WithRequestID(ctx, "include_bodies", includeBodies)...)
+	includeBodies := results[1].Bool()
+	cached, err := h.store.GetBlockByNumber(blockNum, includeBodies)
+	if err == nil {
+		if cached == nil {
+			logger.Debug("found no blocks in block number cache")
 			return false
 		}
-		includeBodies = testIncludeBodies
-	}
 
-	cacheKey := blockNumCacheKey(blockNum, includeBodies)
-	h.logger.Debug("checking block number cache", log.WithRequestID(ctx, "cache_key", cacheKey)...)
-	cached, err := h.cacher.Get(cacheKey)
-	if err == nil && cached != nil {
 		err = writeResponse(res, rpcReq.Id, cached)
 		if err != nil {
-			h.logger.Error("failed to write cached response", "err", err)
+			logger.Error("failed to write cached response", "err", err)
 			return false
 		}
-		h.logger.Debug("found cached block by number response, sending", log.WithRequestID(ctx)...)
+
+		logger.Debug("found cached block by number response, sending")
 		return true
 	}
 
-	if err != nil {
-		h.logger.Error("failed to get block from cache", log.WithRequestID(ctx, "err", err)...)
-	}
-
-	h.logger.Debug("found no blocks in block number cache", log.WithRequestID(ctx)...)
+	logger.Error("failed to get block from cache")
 	return false
 }
 
-func (h *EthHandler) hdlGetBlockByNumberAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, req *http.Request) error {
-	ctx := req.Context()
-	h.logger.Debug("post-processing eth_getBlockByNumber", log.WithRequestID(ctx)...)
-	result := rpcRes.ResultPather()
-	isNil, err := result.IsNil("")
-	if err != nil {
-		return err
-	}
-	if isNil {
-		h.logger.Debug("skipping post-processing for null block")
-		return nil
-	}
-
-	blockNum, err := result.GetHexUint("number")
-	if err != nil {
-		return errors.New("failed to parse block number from RPC results")
-	}
-	includeBodies, err := rpcReq.ParamsPather().GetBool("1")
-	if err == jsonrpc.BadPath {
-		includeBodies = false
-	} else if err != nil {
-		return err
-	}
-
-	var expiry time.Duration
-	if h.hWatcher.IsFinalized(blockNum) {
-		expiry = time.Hour
-	} else {
-		h.logger.Debug("not caching un-finalized block")
-		return nil
-	}
-
-	cacheKey := blockNumCacheKey(blockNum, includeBodies)
-	err = h.cacher.SetEx(cacheKey, rpcRes.Result, expiry)
-	if err != nil {
-		h.logger.Debug("post-processing failed while writing to cache", log.WithRequestID(ctx, "err", err)...)
-		return err
-	}
-	h.logger.Debug("stored request in block number cache", log.WithRequestID(ctx, "cache_key", cacheKey, "size", len(rpcReq.Params))...)
-	return nil
+func (h *EthHandler) hdlGetBlockByNumberAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, logger log15.Logger) error {
+	logger.Debug("post-processing eth_getBlockByNumber")
+	return h.store.CacheBlockByNumber(rpcRes.Result)
 }
 
-func (h *EthHandler) hdlGetTransactionReceiptBefore(res http.ResponseWriter, req *http.Request, rpcReq *jsonrpc.Request) bool {
-	ctx := req.Context()
-	h.logger.Debug("pre-processing eth_getTransactionReceipt", log.WithRequestID(ctx)...)
-	params := rpcReq.ParamsPather()
-	paramCount, err := params.GetLen("")
-	if err != nil {
-		h.logger.Error("encountered invalid request params", log.WithRequestID(ctx, "err", err)...)
-		return false
-	}
-	if paramCount == 0 {
+func (h *EthHandler) hdlGetTransactionReceiptBefore(res http.ResponseWriter, rpcReq *jsonrpc.Request, logger log15.Logger) bool {
+	logger.Debug("pre-processing eth_getTransactionReceipt")
+
+	txHash := gjson.GetBytes(rpcReq.Params, "0").String()
+	if txHash == "" {
+		logger.Debug("encountered invalid tx hash param, bailing")
 		return false
 	}
 
-	hash, err := params.GetString("0")
-	if err != nil {
-		h.logger.Debug("encountered invalid tx hash param, bailing", log.WithRequestID(ctx, "err", err)...)
-		return false
-	}
-
-	cacheKey := txReceiptCacheKey(hash)
-	h.logger.Debug("checking transaction receipt cache", log.WithRequestID(ctx, "cache_key", cacheKey)...)
-	cached, err := h.cacher.Get(cacheKey)
-	if err == nil && cached != nil {
-		err = writeResponse(res, rpcReq.Id, cached)
-		if err != nil {
-			h.logger.Error("failed to write cached response", "err", err)
+	cached, err := h.store.GetTransactionReceipt(txHash)
+	if err == nil {
+		if cached == nil {
+			logger.Debug("found no tx receipts in tx receipt cache")
 			return false
 		}
-		h.logger.Debug("found cached tx receipt response, sending", log.WithRequestID(ctx)...)
+
+		err = writeResponse(res, rpcReq.Id, cached)
+		if err != nil {
+			logger.Error("failed to write cached response", "err", err)
+			return false
+		}
+
+		logger.Debug("found cached tx receipt response, sending")
 		return true
 	}
 
-	if err != nil {
-		h.logger.Error("failed to get tx receipt from cache", log.WithRequestID(ctx, "err", err)...)
-	}
-
-	h.logger.Debug("found no tx receipts in tx receipt cache", log.WithRequestID(ctx)...)
+	logger.Error("failed to get tx receipt from cache")
 	return false
 }
 
-func (h *EthHandler) hdlGetTransactionReceiptAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, req *http.Request) error {
-	ctx := req.Context()
-	h.logger.Debug("post-processing eth_getTransactionReceipt", log.WithRequestID(ctx)...)
-	result := rpcRes.ResultPather()
-	isNil, err := result.IsNil("")
-	if err != nil {
-		return err
-	}
-	if isNil {
-		h.logger.Debug("skipping post-processing for null transaction")
-		return nil
-	}
-
-	txHash, err := result.GetString("transactionHash")
-	if err != nil {
-		return errors.New("failed to parse tx hash from RPC results")
-	}
-	blockNum, err := result.GetHexUint("blockNumber")
-	if err != nil {
-		if err == jsonrpc.NullField {
-			h.logger.Debug("skipping pending transaction", log.WithRequestID(ctx)...)
-			return nil
-		}
-
-		return errors.New("failed to parse block number from RPC results")
-	}
-
-	var expiry time.Duration
-	if h.hWatcher.IsFinalized(blockNum) {
-		expiry = time.Hour
-	} else {
-		h.logger.Debug("not caching un-finalized tx receipt")
-		return nil
-	}
-
-	cacheKey := txReceiptCacheKey(txHash)
-	err = h.cacher.SetEx(cacheKey, rpcRes.Result, expiry)
-	if err != nil {
-		h.logger.Debug("post-processing failed while writing to cache", log.WithRequestID(ctx, "err", err)...)
-		return err
-	}
-	h.logger.Debug("stored request in tx receipt cache", log.WithRequestID(ctx, "cache_key", cacheKey, "size", len(rpcRes.Result))...)
-	return nil
+func (h *EthHandler) hdlGetTransactionReceiptAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, logger log15.Logger) error {
+	logger.Debug("post-processing eth_getTransactionReceipt")
+	return h.store.CacheTransactionReceipt(rpcRes.Result)
 }
 
-func (h *EthHandler) hdlGetBalanceBefore(res http.ResponseWriter, req *http.Request, rpcReq *jsonrpc.Request) bool {
-	ctx := req.Context()
-	h.logger.Debug("pre-processing eth_getBalance", log.WithRequestID(ctx)...)
-	params := rpcReq.ParamsPather()
-	reqBlockNum, err := params.GetString("1")
-	if err != nil {
-		h.logger.Debug("received invalid getBalance block number argument", log.WithRequestID(ctx, "err", err)...)
-		return false
-	}
-	addr, err := params.GetString("0")
-	if err != nil {
-		h.logger.Debug("received invalid getBalance address argument", log.WithRequestID(ctx, "err", err)...)
+func (h *EthHandler) hdlGetBalanceBefore(res http.ResponseWriter, rpcReq *jsonrpc.Request, logger log15.Logger) bool {
+	logger.Debug("pre-processing eth_getBalance")
+	results := gjson.GetManyBytes(rpcReq.Params, "0", "1")
+	if results[1].String() != "latest" {
 		return false
 	}
 
-	if reqBlockNum != "latest" {
+	addr := results[0].String()
+	if addr == "" {
+		logger.Info("encountered empty address, bailing")
 		return false
 	}
-
-	ck := balanceCacheKey(addr)
-	cachedHeightBytes, err := h.cacher.MapGet(ck, "blockNumber")
-	if err != nil {
-		h.logger.Error("encountered error fetching blockNum from balance cache", log.WithRequestID(ctx, "err", err)...)
-		return false
-	}
-	if cachedHeightBytes == nil {
-		h.logger.Debug("no stored balance found for address", log.WithRequestID(ctx, "address", addr)...)
-		return false
-	}
-	// should never overflow
-	cachedHeight, _ := binary.Uvarint(cachedHeightBytes)
-	if h.hWatcher.BlockHeight() > cachedHeight {
-		return false
-	}
-
-	cached, err := h.cacher.MapGet(ck, "balance")
-	if err != nil {
-		h.logger.Error("encountered error fetching balance from balance cache", log.WithRequestID(ctx, "err", err)...)
-		return false
-	}
+	cached, err := h.store.GetBalance(addr)
 	if cached == nil {
-		h.logger.Error("balance is nil, but blockNum isn't. should never happen", log.WithRequestID(ctx, "err", err)...)
+		logger.Debug("no cached balance found")
 		return false
 	}
-
 	err = writeResponse(res, rpcReq.Id, cached)
 	if err != nil {
-		h.logger.Error("encountered error writing response", log.WithRequestID(ctx, "err", err)...)
+		logger.Error("encountered error writing response")
 		return false
 	}
 
 	return true
 }
 
-func (h *EthHandler) hdlGetBalanceAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, req *http.Request) error {
-	ctx := req.Context()
-	h.logger.Debug("post-processing eth_getBalance", log.WithRequestID(ctx)...)
-	params := rpcReq.ParamsPather()
-	addr, err := params.GetString("0")
-	if err != nil {
-		h.logger.Debug("skipping mal-formed address", log.WithRequestID(ctx, "err", err)...)
-		return err
-	}
-	reqHeight, err := params.GetString("1")
-	if err != nil {
-		h.logger.Debug("skipping mal-formed request height", log.WithRequestID(ctx, "err", err)...)
-		return err
-	}
-	if reqHeight != "latest" {
-		h.logger.Debug("skipping non-latest block height balance", log.WithRequestID(ctx, "addr", addr, "req_height", reqHeight)...)
+func (h *EthHandler) hdlGetBalanceAfter(rpcRes *jsonrpc.Response, rpcReq *jsonrpc.Request, logger log15.Logger) error {
+	h.logger.Debug("post-processing eth_getBalance")
+	addr := gjson.GetBytes(rpcReq.Params, "0").String()
+	if addr == "" {
+		h.logger.Debug("skipping mal-formed address")
 		return nil
 	}
 
-	height := h.hWatcher.BlockHeight()
-	balance := rpcRes.Result
-	var blockNumBytes [8]byte
-	binary.PutUvarint(blockNumBytes[:], height)
-	toCache := map[string][]byte {
-		"balance": balance,
-		"blockNumber": blockNumBytes[:],
-	}
-	cacheKey := balanceCacheKey(addr)
-	h.logger.Debug("stored request in balance cache", log.WithRequestID(ctx, "cache_key", cacheKey, "size", len(rpcRes.Result))...)
-	return h.cacher.MapSetEx(cacheKey, toCache, time.Minute)
+	return h.store.CacheBalance(addr, rpcRes.Result)
 }
 
 func writeResponse(res http.ResponseWriter, id interface{}, data []byte) error {
@@ -492,16 +343,4 @@ func failRequest(res http.ResponseWriter, id interface{}, code int, msg string) 
 
 	res.WriteHeader(http.StatusOK)
 	res.Write(out)
-}
-
-func blockNumCacheKey(blockNum uint64, includeBodies bool) string {
-	return fmt.Sprintf("block:%d:%s", blockNum, strconv.FormatBool(includeBodies))
-}
-
-func txReceiptCacheKey(hash string) string {
-	return fmt.Sprintf("txreceipt:%s", hash)
-}
-
-func balanceCacheKey(addr string) string {
-	return fmt.Sprintf("balance:%s:latest", strings.ToLower(addr))
 }
