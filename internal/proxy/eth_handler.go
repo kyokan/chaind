@@ -18,6 +18,7 @@ import (
 	"github.com/kyokan/chaind/pkg/config"
 	"encoding/binary"
 	"strings"
+	"github.com/kyokan/chaind/pkg/sets"
 )
 
 type beforeFunc func(res http.ResponseWriter, req *http.Request, rpcReq *jsonrpc.Request) bool
@@ -35,9 +36,10 @@ type EthHandler struct {
 	handlers map[string]*handler
 	logger   log15.Logger
 	client   *http.Client
+	enabledAPIs *sets.StringSet
 }
 
-func NewEthHandler(cacher cache.Cacher, auditor audit.Auditor, hWatcher *BlockHeightWatcher) *EthHandler {
+func NewEthHandler(cacher cache.Cacher, auditor audit.Auditor, hWatcher *BlockHeightWatcher, enabledAPIs []string) *EthHandler {
 	h := &EthHandler{
 		cacher:   cacher,
 		auditor:  auditor,
@@ -46,6 +48,7 @@ func NewEthHandler(cacher cache.Cacher, auditor audit.Auditor, hWatcher *BlockHe
 		client: &http.Client{
 			Timeout: time.Second,
 		},
+		enabledAPIs: sets.NewStringSet(enabledAPIs),
 	}
 	h.handlers = map[string]*handler{
 		"eth_blockNumber": {
@@ -121,6 +124,12 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 	err = h.auditor.RecordRequest(req, body, pkg.EthBackend)
 	if err != nil {
 		h.logger.Error("failed to record audit log for request", log.WithRequestID(ctx, "err", err)...)
+	}
+
+	split := strings.Split(rpcReq.Method, "_")
+	if !h.enabledAPIs.Contains(split[0]) {
+		failRequest(res, rpcReq.Id, -32602, "bad request")
+		return
 	}
 
 	hdlr := h.handlers[rpcReq.Method]

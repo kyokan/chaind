@@ -27,7 +27,7 @@ func NewProxy(sw BackendSwitch, auditor audit.Auditor, cacher cache.Cacher, fHel
 	return &Proxy{
 		sw:         sw,
 		config:     config,
-		ethHandler: NewEthHandler(cacher, auditor, fHelper),
+		ethHandler: NewEthHandler(cacher, auditor, fHelper, config.ETHConfig.APIs),
 		quitChan:   make(chan bool),
 		errChan:    make(chan error),
 	}
@@ -39,7 +39,7 @@ func (p *Proxy) Start() error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(fmt.Sprintf("/%s", p.config.ETHUrl), p.handleETHRequest)
+	mux.HandleFunc(fmt.Sprintf("/%s", p.config.ETHConfig.Path), p.handleETHRequest)
 	s := new(http.Server)
 	s.Addr = fmt.Sprintf(":%d", p.config.RPCPort)
 	s.Handler = mux
