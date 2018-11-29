@@ -47,6 +47,7 @@ func (c *Client) Call(method string, params... interface{}) (*Response, error) {
 	}
 
 	httpReq, err := http.NewRequest("POST", c.url, bytes.NewReader(serReq))
+	httpReq.Header.Set("Content-Type", "application/json")
 	if err != nil {
 		return nil, err
 	}
