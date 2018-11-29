@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 ### Added
+- Cache warmer that by default caches transaction receipts and block data for the latest 200 finalized blocks.
 - Ability to selectively disable Ethereum APIs from the config file. 
 
 ### Changed
