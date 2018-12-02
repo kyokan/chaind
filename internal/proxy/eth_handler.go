@@ -16,6 +16,9 @@ import (
 	"strings"
 	"github.com/kyokan/chaind/pkg/sets"
 	"github.com/tidwall/gjson"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/kyokan/chaind/pkg/metrics"
 )
 
 type beforeFunc func(res http.ResponseWriter, rpcReq *jsonrpc.Request, logger log15.Logger) bool
@@ -34,6 +37,13 @@ type EthHandler struct {
 	logger      log15.Logger
 	client      *http.Client
 	enabledAPIs *sets.StringSet
+
+	requestCount       prometheus.Counter
+	cacheHits          prometheus.Counter
+	cacheMisses        prometheus.Counter
+	batchRequestCount  prometheus.Counter
+	singleRequestCount prometheus.Counter
+	batchSize          prometheus.Histogram
 }
 
 func NewEthHandler(store *cache.ETHStore, auditor audit.Auditor, hWatcher *cache.BlockHeightWatcher, enabledAPIs []string) *EthHandler {
@@ -46,6 +56,37 @@ func NewEthHandler(store *cache.ETHStore, auditor audit.Auditor, hWatcher *cache
 			Timeout: time.Second,
 		},
 		enabledAPIs: sets.NewStringSet(enabledAPIs),
+		requestCount: promauto.NewCounter(prometheus.CounterOpts{
+			Name:      "eth_request_count",
+			Subsystem: metrics.Subsystem,
+			Help:      "Total number of Ethereum RPC requests.",
+		}),
+		cacheHits: promauto.NewCounter(prometheus.CounterOpts{
+			Name:      "eth_cache_hits",
+			Subsystem: metrics.Subsystem,
+			Help:      "Total number of Ethereum RPC cache hits.",
+		}),
+		cacheMisses: promauto.NewCounter(prometheus.CounterOpts{
+			Name:      "eth_cache_misses",
+			Subsystem: metrics.Subsystem,
+			Help:      "Total number of Ethereum RPC cache misses.",
+		}),
+		batchRequestCount: promauto.NewCounter(prometheus.CounterOpts{
+			Name:      "eth_batch_request_count",
+			Subsystem: metrics.Subsystem,
+			Help:      "Number of batched requests.",
+		}),
+		singleRequestCount: promauto.NewCounter(prometheus.CounterOpts{
+			Name:      "eth_single_request_count",
+			Subsystem: metrics.Subsystem,
+			Help:      "Number of single requests.",
+		}),
+		batchSize: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:      "eth_batch_size",
+			Subsystem: metrics.Subsystem,
+			Help:      "Size of incoming batch requests, denoted in number of requests in each batch.",
+			Buckets:   prometheus.LinearBuckets(1, 100, 20),
+		}),
 	}
 	h.handlers = map[string]*handler{
 		"eth_blockNumber": {
@@ -79,6 +120,7 @@ func (h *EthHandler) Handle(res http.ResponseWriter, req *http.Request, backend 
 	firstChar := string(body[0])
 	// check if this is a batch request
 	if firstChar == "[" {
+		h.batchRequestCount.Add(1)
 		logger.Debug("got batch request")
 		var rpcReqs []jsonrpc.Request
 		err = json.Unmarshal(body, &rpcReqs)
@@ -88,6 +130,7 @@ func (h *EthHandler) Handle(res http.ResponseWriter, req *http.Request, backend 
 			return
 		}
 
+		h.batchSize.Observe(float64(len(rpcReqs)))
 		batch := pkg.NewBatchResponse(res)
 		for _, rpcReq := range rpcReqs {
 			h.hdlRPCRequest(batch.ResponseWriter(), req, backend, &rpcReq)
@@ -98,6 +141,7 @@ func (h *EthHandler) Handle(res http.ResponseWriter, req *http.Request, backend 
 
 		logger.Debug("processed batch request")
 	} else {
+		h.singleRequestCount.Add(1)
 		logger.Debug("got single request")
 		var rpcReq jsonrpc.Request
 		err = json.Unmarshal(body, &rpcReq)
@@ -135,9 +179,11 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 		handledInBefore = hdlr.before(res, rpcReq, logger)
 	}
 	if handledInBefore {
+		h.cacheHits.Add(1)
 		logger.Debug("request handled in before filter")
 		return
 	}
+	h.cacheMisses.Add(1)
 
 	proxyRes, err := h.client.Post(backend.URL, "application/json", bytes.NewReader(body))
 	if err != nil || proxyRes.StatusCode != 200 {

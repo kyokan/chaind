@@ -39,6 +39,7 @@ type Config struct {
 	Home             string            `mapstructure:"home"`
 	CertPath         string            `mapstructure:"cert_path"`
 	UseTLS           bool              `mapstructure:"use_tls"`
+	EnablePrometheus bool              `mapstructure:"enable_prometheus"`
 	ETHConfig        *ETH              `mapstructure:"eth"`
 	RPCPort          int               `mapstructure:"rpc_port"`
 	LogLevel         string            `mapstructure:"log_level"`

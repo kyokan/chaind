@@ -11,7 +11,9 @@ import (
 	"github.com/kyokan/chaind/internal/cache"
 	"github.com/inconshreveable/log15"
 	"github.com/kyokan/chaind/internal/backend"
-)
+	"net/http"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	)
 
 func Start(cfg *config.Config) error {
 	if err := config.ValidateConfig(cfg); err != nil {
@@ -29,6 +31,12 @@ func Start(cfg *config.Config) error {
 	sw := backend.NewSwitcher(cfg.Backends)
 	if err := sw.Start(); err != nil {
 		return err
+	}
+
+	if cfg.EnablePrometheus {
+		logger.Info("Prometheus metrics enabled, listening on port 2112")
+		http.Handle("/metrics", promhttp.Handler())
+		go http.ListenAndServe(":2112", nil)
 	}
 
 	cacher := cache.NewRedisCacher(cfg.RedisConfig)
