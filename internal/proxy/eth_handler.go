@@ -117,6 +117,8 @@ func (h *EthHandler) Handle(res http.ResponseWriter, req *http.Request, backend 
 		return
 	}
 
+	h.requestCount.Add(1)
+
 	firstChar := string(body[0])
 	// check if this is a batch request
 	if firstChar == "[" {
