@@ -189,6 +189,7 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 
 	proxyRes, err := h.client.Post(backend.URL, "application/json", bytes.NewReader(body))
 	if err != nil || proxyRes.StatusCode != 200 {
+		logger.Error("received error result from backend", "err", err)
 		failRequest(res, rpcReq.ID, -32602, "bad request")
 		return
 	}
@@ -197,10 +198,11 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 	resBody, err := ioutil.ReadAll(proxyRes.Body)
 	if err != nil {
 		failWithInternalError(res, rpcReq.ID, err)
-		logger.Error("failed to read body")
+		logger.Error("failed to read body", "err", err)
+		return
 	}
 
-	res.Write(resBody)
+	_, err = res.Write(resBody)
 	if err != nil {
 		logger.Error("failed to flush proxied request")
 		failWithInternalError(res, rpcReq.ID, err)
@@ -210,7 +212,7 @@ func (h *EthHandler) hdlRPCRequest(res http.ResponseWriter, req *http.Request, b
 	var rpcRes jsonrpc.Response
 	err = json.Unmarshal(resBody, &rpcRes)
 	if err != nil {
-		logger.Debug("skipping post-processors for error response")
+		logger.Error("received un-parseable response from backend", "err", err)
 		return
 	}
 
