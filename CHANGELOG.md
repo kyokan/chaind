@@ -12,3 +12,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 - Moved the `eth_path` config variable into a dedicated `eth` stanza.
+
+### Fixed
+- Fixed a bug that prevented backends declared before the `main` backend from being selected during failover. 
