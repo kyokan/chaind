@@ -9,11 +9,12 @@ import (
 	"net/http"
 	"errors"
 	"strings"
-		"sync/atomic"
-	"encoding/json"
+	"sync/atomic"
 	"github.com/kyokan/chaind/pkg/config"
 	"sync"
-		)
+	"io/ioutil"
+	"github.com/tidwall/gjson"
+)
 
 const ethCheckBody = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":%d}"
 
@@ -32,21 +33,21 @@ type SwitcherImpl struct {
 
 func NewSwitcher(backendCfg []config.Backend) Switcher {
 	var ethBackends []config.Backend
-	var currEth int32
 
-	for i, backend := range backendCfg {
-		if backend.Type == pkg.EthBackend {
-			ethBackends = append(ethBackends, backend)
+	for _, backend := range backendCfg {
+		if backend.Type != pkg.EthBackend {
+			continue
 		}
 
 		if backend.Main {
-			currEth = int32(i)
+			ethBackends = append([]config.Backend{backend}, ethBackends...)
+		} else {
+			ethBackends = append(ethBackends, backend)
 		}
 	}
 
 	return &SwitcherImpl{
 		ethBackends: ethBackends,
-		currEth:     currEth,
 		quitChan:    make(chan bool),
 		logger:      log.NewLog("proxy/backend_switch"),
 	}
@@ -57,14 +58,13 @@ func (h *SwitcherImpl) Start() error {
 	h.performAllHealthchecks()
 
 	go func() {
-		tick := time.NewTicker(1 * time.Second)
-
 		for {
 			select {
-			case <-tick.C:
-				h.performAllHealthchecks()
 			case <-h.quitChan:
 				return
+			default:
+				h.performAllHealthchecks()
+				time.Sleep(time.Second)
 			}
 		}
 	}()
@@ -79,7 +79,6 @@ func (h *SwitcherImpl) Stop() error {
 
 func (h *SwitcherImpl) BackendFor(t pkg.BackendType) (*config.Backend, error) {
 	var idx int32
-
 	if t == pkg.EthBackend {
 		idx = atomic.LoadInt32(&h.currEth)
 	} else {
@@ -137,7 +136,7 @@ func (h *SwitcherImpl) doHealthcheck(idx int32, list []config.Backend) int32 {
 
 func (h *SwitcherImpl) nextBackend(idx int32, list []config.Backend) (int32, []config.Backend) {
 	backend := list[idx]
-	if len(list) == 1 || idx == int32(len(list) - 1) {
+	if len(list) == 1 || idx == int32(len(list)-1) {
 		h.logger.Error("no more backends to try", "type", backend.Type)
 		return -1, list
 	}
@@ -181,13 +180,17 @@ func (e *ETHChecker) Check() bool {
 		return false
 	}
 	defer res.Body.Close()
-	var dec map[string]interface{}
-	err = json.NewDecoder(res.Body).Decode(&dec)
+	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		e.logger.Warn("backend returned invalid JSON", "name", e.backend.Name, "url", e.backend.URL)
+		e.logger.Error("backend returned unreadable request body", "err", err)
 		return false
 	}
-	if _, ok := dec["result"].(bool); !ok {
+	syncRes := gjson.GetBytes(body, "result").String()
+	// perform a string comparison here, since the result we want to see is
+	// boolean 'false' but gjson returns boolean false if the JSON value
+	// can't be cast to a bool, which happens when the node is syncing since
+	// the response is a sync status object.
+	if syncRes != "false" {
 		e.logger.Warn("backend is either completing initial sync or has fallen behind", "name", e.backend.Name, "url", e.backend.URL)
 		return false
 	}
