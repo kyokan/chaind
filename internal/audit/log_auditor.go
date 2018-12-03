@@ -9,10 +9,15 @@ import (
 	"net/http"
 	"github.com/kyokan/chaind/pkg/jsonrpc"
 	"github.com/kyokan/chaind/pkg/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/kyokan/chaind/pkg/metrics"
 )
 
 type LogAuditor struct {
 	logger log15.Logger
+
+	requestCount *prometheus.CounterVec
 }
 
 func NewLogAuditor(cfg *config.LogAuditorConfig) (Auditor, error) {
@@ -29,6 +34,10 @@ func NewLogAuditor(cfg *config.LogAuditorConfig) (Auditor, error) {
 
 	return &LogAuditor{
 		logger: logger,
+		requestCount: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name:      "eth_audit_rpc_request_count",
+			Subsystem: metrics.Subsystem,
+		}, []string{"method_name"}),
 	}, nil
 }
 
@@ -57,6 +66,7 @@ func (l *LogAuditor) recordETHRequest(req *http.Request, body []byte) error {
 	if err != nil {
 		return err
 	}
+	l.requestCount.WithLabelValues(rpcReq.Method).Add(1)
 	logger.Info(
 		"received JSON-RPC request",
 		"rpc_method", rpcReq.Method,
