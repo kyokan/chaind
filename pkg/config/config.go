@@ -72,10 +72,16 @@ type ETH struct {
 
 func init() {
 	home := mustExpand(DefaultHome)
+	port := os.Getenv("PORT")
+
+	if port == "" {
+        log.Fatal("$PORT must be set")
+	}
+	
 	viper.SetDefault(FlagHome, home)
 	viper.SetDefault(FlagCertPath, "")
 	viper.SetDefault(FlagUseTLS, false)
-	viper.SetDefault(os.Getenv("PORT"), 8080)
+	viper.SetDefault(port, 8080)
 }
 
 func ReadConfig(allowDefaults bool) (Config, error) {
