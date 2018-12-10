@@ -172,7 +172,7 @@ func (e *ETHChecker) Check() bool {
 	id := time.Now().Unix()
 	data := fmt.Sprintf(ethCheckBody, id)
 	client := &http.Client{
-		Timeout: time.Duration(2 * time.Second),
+		Timeout: time.Duration(5 * time.Second),
 	}
 	res, err := client.Post(e.backend.URL, "application/json", strings.NewReader(data))
 	if err != nil {
