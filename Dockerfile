@@ -6,7 +6,7 @@ RUN apk add git make curl && \
 
 ENV workspace /build
 
-COPY $workspace $GOPATH/src/github.com/kyokan/chaind
+COPY / $GOPATH/src/github.com/kyokan/chaind
 COPY build-cross.sh /
 
 CMD ["/build-cross.sh"]
