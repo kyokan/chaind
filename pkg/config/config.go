@@ -19,7 +19,7 @@ const (
 	FlagHome     = "home"
 	FlagCertPath = "cert_path"
 	FlagUseTLS   = "use_tls"
-	FlagRPCPort  = "rpc_port"
+	FlagRPCPort  = os.Getenv("PORT")
 )
 
 var ValidETHAPIs = sets.NewStringSet([]string{

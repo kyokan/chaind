@@ -1,7 +1,6 @@
 btc_path = "btc"
 cert_path = ""
 home = "/etc/chaind"
-rpc_port = 8080
 use_tls = false
 log_level = "info"
 
