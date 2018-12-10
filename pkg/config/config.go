@@ -74,7 +74,7 @@ type ETH struct {
 func init() {
 	home := mustExpand(DefaultHome)
 	port := os.Getenv("PORT")
-
+	rmt.Println("port -", port)
 	if port == "" {
         log.Fatal("$PORT must be set")
 	}
