@@ -19,7 +19,6 @@ const (
 	FlagHome     = "home"
 	FlagCertPath = "cert_path"
 	FlagUseTLS   = "use_tls"
-	FlagRPCPort  = os.Getenv("PORT")
 )
 
 var ValidETHAPIs = sets.NewStringSet([]string{
@@ -76,7 +75,7 @@ func init() {
 	viper.SetDefault(FlagHome, home)
 	viper.SetDefault(FlagCertPath, "")
 	viper.SetDefault(FlagUseTLS, false)
-	viper.SetDefault(FlagRPCPort, 8080)
+	viper.SetDefault(os.Getenv("PORT"), 8080)
 }
 
 func ReadConfig(allowDefaults bool) (Config, error) {
