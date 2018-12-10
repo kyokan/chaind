@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/viper"
 	"path"
 	"os"
+	"log"
 	"fmt"
 	"github.com/mitchellh/go-homedir"
 	"errors"
