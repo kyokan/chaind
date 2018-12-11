@@ -16,15 +16,22 @@ type Client struct {
 }
 
 func NewClient(url string, timeout time.Duration) *Client {
+	defRT := http.DefaultTransport
+	defRTPtr := defRT.(*http.Transport)
+	transport := *defRTPtr
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = 100
+
 	return &Client{
 		url: url,
 		client: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: &transport,
 		},
 	}
 }
 
-func (c *Client) Call(method string, params... interface{}) (*Response, error) {
+func (c *Client) Call(method string, params ... interface{}) (*Response, error) {
 	if params == nil {
 		params = []interface{}{}
 	}

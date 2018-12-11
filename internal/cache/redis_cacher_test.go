@@ -9,7 +9,7 @@ import (
 func TestRedisCacher(t *testing.T) {
 	suite.Run(t, &CacherSuite{
 		cacher: NewRedisCacher(&config.RedisConfig{
-			URL: "localhost:6379",
+			URL: "127.0.0.1:6379",
 		}),
 	})
 }
