@@ -33,9 +33,7 @@ func NewBlockHeightWatcher(sw backend.Switcher) *BlockHeightWatcher {
 		sw:       sw,
 		quitChan: make(chan bool),
 		logger:   log.NewLog("proxy/block_number_watcher"),
-		client: &http.Client{
-			Timeout: time.Second,
-		},
+		client: pkg.NewHTTPClient(5 * time.Second),
 		subs: make(map[int]BlockSub),
 	}
 }
