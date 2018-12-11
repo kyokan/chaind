@@ -50,7 +50,6 @@ func (c *Client) Call(method string, params ... interface{}) (*Response, error) 
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Close = true
 	res, err := c.client.Do(httpReq)
 	if err != nil {
 		return nil, err
