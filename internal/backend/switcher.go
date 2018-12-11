@@ -6,7 +6,6 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/kyokan/chaind/pkg/log"
 	"fmt"
-	"net/http"
 	"errors"
 	"strings"
 	"sync/atomic"
@@ -171,9 +170,7 @@ type ETHChecker struct {
 func (e *ETHChecker) Check() bool {
 	id := time.Now().Unix()
 	data := fmt.Sprintf(ethCheckBody, id)
-	client := &http.Client{
-		Timeout: time.Duration(5 * time.Second),
-	}
+	client := pkg.NewHTTPClient(5 * time.Second)
 	res, err := client.Post(e.backend.URL, "application/json", strings.NewReader(data))
 	if err != nil {
 		e.logger.Warn("backend returned non-200 response", "name", e.backend.Name, "url", e.backend.URL)

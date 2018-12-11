@@ -52,9 +52,7 @@ func NewEthHandler(store *cache.ETHStore, auditor audit.Auditor, hWatcher *cache
 		auditor:  auditor,
 		hWatcher: hWatcher,
 		logger:   log.NewLog("proxy/eth_handler"),
-		client: &http.Client{
-			Timeout: time.Second,
-		},
+		client: pkg.NewHTTPClient(10 * time.Second),
 		enabledAPIs: sets.NewStringSet(enabledAPIs),
 		requestCount: promauto.NewCounter(prometheus.CounterOpts{
 			Name:      "eth_request_count",

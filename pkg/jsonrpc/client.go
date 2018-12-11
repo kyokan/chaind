@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"io/ioutil"
 	"sync/atomic"
-	"net"
+	"github.com/kyokan/chaind/pkg"
 )
 
 type Client struct {
@@ -17,26 +17,9 @@ type Client struct {
 }
 
 func NewClient(url string, timeout time.Duration) *Client {
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-			DualStack: true,
-		}).DialContext,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
-
 	return &Client{
 		url: url,
-		client: &http.Client{
-			Timeout:   timeout,
-			Transport: transport,
-		},
+		client: pkg.NewHTTPClient(timeout),
 	}
 }
 
